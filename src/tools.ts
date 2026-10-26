@@ -58,7 +58,7 @@ export function registerCoreTools(server: McpServer): void {
       if (session && !account) {
         try {
           const res = await cisRequest("/student_dashboard", { method: "GET" });
-          const name = firstMatch(res.body, /Hi,\s*([^<]+?)\s*</i) ?? session.fullName;
+          const name = firstMatch(res.body, /Hi,\s*([^<&"]+?)\s*[<&"]/i) ?? session.fullName;
           return jsonResult({
             loggedIn: true,
             name,
@@ -74,7 +74,7 @@ export function registerCoreTools(server: McpServer): void {
       try {
         const accounts = (await listAccounts()).filter((a) => a !== "");
         const res = await cisRequest("/student_dashboard", { method: "GET", account });
-        const name = firstMatch(res.body, /Hi,\s*([^<]+?)\s*</i);
+        const name = firstMatch(res.body, /Hi,\s*([^<&"]+?)\s*[<&"]/i);
         return jsonResult({
           loggedIn: true,
           name: name ?? undefined,

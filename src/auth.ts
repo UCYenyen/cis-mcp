@@ -1,18 +1,10 @@
 import { SITE_URL } from "./config.ts";
 import { firstMatch } from "./html.ts";
 import type { CisSession } from "./session.ts";
-import { saveSession } from "./session.ts";
+import { cookieHeader, mergeSetCookies, saveSession } from "./session.ts";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-function extractCiSession(cookies: string[]): string | null {
-  for (const cookie of cookies) {
-    const match = /^ci_session=([^;]+)/i.exec(cookie.trim());
-    if (match?.[1]) return match[1];
-  }
-  return null;
-}
 
 /**
  * Logs in to the Ciputra CEdX portal using username and password.
@@ -35,8 +27,17 @@ export async function loginWithCredentials(username: string, password: string): 
   }
 
   const initialHtml = await initialRes.text();
-  let ciSession = extractCiSession(initialRes.headers.getSetCookie());
-  if (!ciSession) {
+  // Collects every cookie the portal sets; the logged-in state is carried by tokencis, not ci_session.
+  const jar: CisSession = {
+    siteUrl: SITE_URL,
+    ciSession: "-",
+    cookies: {},
+    username: trimmedUser,
+    fullName: "",
+    createdAt: new Date().toISOString(),
+  };
+  mergeSetCookies(jar, initialRes.headers.getSetCookie());
+  if (!jar.cookies.ci_session) {
     throw new Error("Could not acquire initial CEdX session cookie.");
   }
 
@@ -57,7 +58,7 @@ export async function loginWithCredentials(username: string, password: string): 
     headers: {
       "User-Agent": USER_AGENT,
       "Content-Type": "application/x-www-form-urlencoded",
-      Cookie: `ci_session=${ciSession}`,
+      Cookie: cookieHeader(jar),
       Referer: `${SITE_URL}/`,
       Origin: SITE_URL,
     },
@@ -65,9 +66,7 @@ export async function loginWithCredentials(username: string, password: string): 
     redirect: "manual",
   });
 
-  // Track updated session cookie if provided
-  const updatedCi = extractCiSession(authRes.headers.getSetCookie());
-  if (updatedCi) ciSession = updatedCi;
+  mergeSetCookies(jar, authRes.headers.getSetCookie());
 
   // 3. Inspect redirect target or follow-up page
   const redirectLoc = authRes.headers.get("location");
@@ -81,12 +80,10 @@ export async function loginWithCredentials(username: string, password: string): 
     const followRes = await fetch(fullLoc, {
       headers: {
         "User-Agent": USER_AGENT,
-        Cookie: `ci_session=${ciSession}`,
+        Cookie: cookieHeader(jar),
       },
     });
-
-    const followCi = extractCiSession(followRes.headers.getSetCookie());
-    if (followCi) ciSession = followCi;
+    mergeSetCookies(jar, followRes.headers.getSetCookie());
 
     const followHtml = await followRes.text();
 
@@ -106,29 +103,21 @@ export async function loginWithCredentials(username: string, password: string): 
     const dashRes = await fetch(`${SITE_URL}/student_dashboard`, {
       headers: {
         "User-Agent": USER_AGENT,
-        Cookie: `ci_session=${ciSession}`,
+        Cookie: cookieHeader(jar),
       },
     });
-    const dashCi = extractCiSession(dashRes.headers.getSetCookie());
-    if (dashCi) ciSession = dashCi;
+    mergeSetCookies(jar, dashRes.headers.getSetCookie());
     dashboardHtml = await dashRes.text();
   }
 
-  const nameMatch = firstMatch(dashboardHtml, /Hi,\s*([^<]+?)\s*</i);
+  const nameMatch = firstMatch(dashboardHtml, /Hi,\s*([^<&"]+?)\s*[<&"]/i);
   if (!nameMatch) {
     throw new Error(
       "CEdX login failed. Incorrect username or password, or session was rejected.",
     );
   }
 
-  const session: CisSession = {
-    siteUrl: SITE_URL,
-    ciSession,
-    username: trimmedUser,
-    fullName: nameMatch.trim(),
-    createdAt: new Date().toISOString(),
-  };
-
-  await saveSession(session);
-  return session;
+  jar.fullName = nameMatch.trim();
+  await saveSession(jar);
+  return jar;
 }

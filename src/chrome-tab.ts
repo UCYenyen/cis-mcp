@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { BROWSER_APP, SITE_HOST, SITE_URL } from "./config.ts";
 import type { CisSession } from "./session.ts";
-import { loadSession, saveSession } from "./session.ts";
+import { cookieHeader, loadSession, mergeSetCookies, saveSession } from "./session.ts";
 
 const run = promisify(execFile);
 
@@ -99,7 +99,7 @@ const PROBE_ACCOUNT_CODE = `(function () {
     var xhr = new XMLHttpRequest();
     xhr.open("GET", "/student_dashboard", false);
     xhr.send(null);
-    var m = /Hi,\\s*([^<]+?)\\s*</i.exec(xhr.responseText || "");
+    var m = /Hi,\\s*([^<&"]+?)\\s*[<&"]/i.exec(xhr.responseText || "");
     return m ? m[1] : "";
   } catch (e) { return ""; }
 })()`;
@@ -168,7 +168,7 @@ async function fetchWithSession(
   const method = options.method ?? (options.data ? "POST" : "GET");
   const headers: Record<string, string> = {
     "User-Agent": USER_AGENT,
-    Cookie: `ci_session=${session.ciSession}`,
+    Cookie: cookieHeader(session),
     Referer: `${SITE_URL}/student_dashboard`,
   };
 
@@ -190,13 +190,8 @@ async function fetchWithSession(
   });
 
   // Track session cookie updates
-  const setCookies = res.headers.getSetCookie();
-  for (const c of setCookies) {
-    const match = /^ci_session=([^;]+)/i.exec(c.trim());
-    if (match?.[1] && match[1] !== session.ciSession) {
-      session.ciSession = match[1];
-      await saveSession(session);
-    }
+  if (mergeSetCookies(session, res.headers.getSetCookie())) {
+    await saveSession(session);
   }
 
   const text = await res.text();
