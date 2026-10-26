@@ -10,6 +10,25 @@ const COS = "f8c82c9f-65aa-11e5-96cc-0cc47a018ff3"; // Universitas Ciputra Surab
 const MEETING_ROOM = "c4b4d976-1348-11e9-ac47-000d3aa02732"; // book_type that holds the library rooms
 
 /**
+ * Maps a slot time ("17:30:00") to the slot number the booking form submits ("13"). The form's
+ * slot selects carry the number as their value; sending the time makes the portal read "17:30:00"
+ * as slot 17 and book the wrong hours.
+ */
+async function slotNumber(barcode: string, time: string, account?: string): Promise<string> {
+  const res = await cisRequest("/index.php/booking/get_slot_by_barcode", {
+    data: { cos_id: COS, barcode_id: barcode, book_type: MEETING_ROOM },
+    account,
+  });
+  const want = time.trim().length === 5 ? `${time.trim()}:00` : time.trim();
+  const re = /<option\b[^>]*value='(\d+)'[^>]*>\s*([\d:]+)\s*<\/option>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(res.body))) {
+    if (m[2] === want) return m[1]!;
+  }
+  throw new Error(`"${time}" is not a slot boundary for this room. Use the slot_time values from cis_room_schedule.`);
+}
+
+/**
  * The booking form token (stc). The portal issues a new one on every load of the booking page and
  * answers "Invalid access" to a submit carrying any other, so fetch it right before submitting.
  */
@@ -194,6 +213,8 @@ export function registerBookingTools(server: McpServer): void {
       const r = await resolveRoom(room, account);
       const title = ROLES[role]!;
       const day = weekday(date);
+      const slotStartNo = await slotNumber(r.barcode, slotStart, account);
+      const slotEndNo = await slotNumber(r.barcode, slotEnd, account);
 
       // Overlap check first.
       const check = await cisRequest("/index.php/booking/check_booking", {
@@ -202,8 +223,8 @@ export function registerBookingTools(server: McpServer): void {
           barcode_id: r.barcode,
           start_date: date,
           end_date: date,
-          slot_start: slotStart,
-          slot_end: slotEnd,
+          slot_start: slotStartNo,
+          slot_end: slotEndNo,
           day,
           id: "",
         },
@@ -237,8 +258,8 @@ export function registerBookingTools(server: McpServer): void {
         start_date: date,
         end_date: date,
         day,
-        slot_start: slotStart,
-        slot_end: slotEnd,
+        slot_start: slotStartNo,
+        slot_end: slotEndNo,
         room_id: "",
         other_location: "",
         cos_id: COS,
