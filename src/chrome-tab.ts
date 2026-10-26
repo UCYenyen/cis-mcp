@@ -138,7 +138,12 @@ function buildInTabCode(method: string, url: string, data: Record<string, unknow
         var params = new URLSearchParams();
         var d = ${JSON.stringify(data ?? {})};
         for (var k in d) {
-          if (d[k] !== undefined && d[k] !== null) params.append(k, String(d[k]));
+          if (d[k] === undefined || d[k] === null) continue;
+          if (typeof d[k] === "object") {
+            for (var s in d[k]) if (d[k][s] !== undefined && d[k][s] !== null) params.append(k + "[" + s + "]", String(d[k][s]));
+          } else {
+            params.append(k, String(d[k]));
+          }
         }
         xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
         body = params.toString();
@@ -160,6 +165,22 @@ export interface CisResponse {
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/** Form-encodes like jQuery's $.param: a nested object becomes key[sub]=value (e.g. data_booking[stc]). */
+function encodeForm(data: Record<string, unknown>): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(data)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v === "object") {
+      for (const [sub, sv] of Object.entries(v as Record<string, unknown>)) {
+        if (sv !== undefined && sv !== null) params.append(`${k}[${sub}]`, String(sv));
+      }
+    } else {
+      params.append(k, String(v));
+    }
+  }
+  return params.toString();
+}
+
 async function fetchWithSession(
   session: CisSession,
   url: string,
@@ -174,12 +195,8 @@ async function fetchWithSession(
 
   let body: string | undefined = undefined;
   if (method === "POST" && options.data) {
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(options.data)) {
-      if (v !== undefined && v !== null) params.append(k, String(v));
-    }
     headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
-    body = params.toString();
+    body = encodeForm(options.data);
   }
 
   const res = await fetch(url, {

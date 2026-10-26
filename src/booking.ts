@@ -8,7 +8,17 @@ import { autoApproveBookings } from "./config.ts";
 
 const COS = "f8c82c9f-65aa-11e5-96cc-0cc47a018ff3"; // Universitas Ciputra Surabaya
 const MEETING_ROOM = "c4b4d976-1348-11e9-ac47-000d3aa02732"; // book_type that holds the library rooms
-const STC = "73f170d9b96a7dcfefc70fcabbfbd6f6"; // static form token used by the booking page
+
+/**
+ * The booking form token (stc). The portal issues a new one on every load of the booking page and
+ * answers "Invalid access" to a submit carrying any other, so fetch it right before submitting.
+ */
+async function fetchStc(account?: string): Promise<string> {
+  const res = await cisRequest("/booking/booking_list", { method: "GET", account });
+  const m = /name="stc"\s+value="([^"]+)"/i.exec(res.body);
+  if (!m?.[1]) throw new Error("Could not read the booking form token (stc) from the CEdX booking page.");
+  return m[1];
+}
 
 /** Role -> { title_id, os_id } (from the booking page's title_os map). */
 const ROLES: Record<string, { titleId: string; osId: string }> = {
@@ -213,9 +223,10 @@ export function registerBookingTools(server: McpServer): void {
         return jsonResult({ booked: false, cancelled: true, reason: "The confirmation dialog was not approved. Nothing was booked." });
       }
 
+      const stc = await fetchStc(account);
       const dataBooking: Record<string, unknown> = {
-        stc: STC,
-        cek_klik: "",
+        stc,
+        cek_klik: "0",
         item_id: MEETING_ROOM,
         barcode_id: r.barcode,
         title_id: title.titleId,
@@ -239,7 +250,7 @@ export function registerBookingTools(server: McpServer): void {
       };
 
       const res = await cisRequest("/index.php/booking/submit_booking", {
-        data: { data_booking: dataBooking, stc: STC, flagSubmit: "W" },
+        data: { data_booking: dataBooking, stc, flagSubmit: "W" },
         account,
       });
       let result: unknown;
