@@ -107,7 +107,7 @@ export function registerBookingTools(server: McpServer): void {
     {
       title: "Room booking schedule",
       description:
-        "Shows a room's booking schedule for a date: the time slots and which are already booked. Pass a room name (e.g. 'Collaboration Room') or its barcode.",
+        "Shows a room's booking schedule for a date: the time slots, approved bookings (`bookings`) and pending requests (`pendingBookings`); both occupy their slots. Pass a room name (e.g. 'Collaboration Room') or its barcode.",
       inputSchema: {
         room: z.string().describe("Room name or barcode from cis_list_library_rooms"),
         date: z.string().describe("Date as YYYY-MM-DD"),
@@ -133,6 +133,8 @@ export function registerBookingTools(server: McpServer): void {
         slots: data["data_slot"],
         dates: data["data_date"],
         bookings: data["data_booking_filter"],
+        // Pending (not yet approved) requests; the portal shows these as taken too.
+        pendingBookings: data["data_booking_warning"],
       });
     },
   );
