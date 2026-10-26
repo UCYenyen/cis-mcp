@@ -2,22 +2,26 @@
 
 MCP server for the **Ciputra CEdX student portal** (https://student.ciputra.ac.id).
 
-CEdX is a CodeIgniter app with no public API and Google SSO, so there is no long-lived
-token to store. Instead, like a sibling of the elearn-mcp, every request runs **inside your
-already-open, logged-in CEdX tab** in Chrome (via AppleScript on macOS). Your session cookies
-ride along automatically and no password is ever stored.
-
-**One-time Chrome setting:** View -> Developer -> "Allow JavaScript from Apple Events". macOS
-may also ask, the first time, whether your terminal/editor may control Chrome; allow it.
+Log in once with your CEdX username and password (saved securely to `~/.config/cis-mcp/session.json`, permissions `600`), or seamlessly fall back to an open, logged-in CEdX tab in Google Chrome.
 
 ## Setup
 
 ```bash
 pnpm install
+pnpm signin   # prompts for your CEdX username and password
 ```
 
-Register with the Claude desktop app (or run the sibling setup script pattern), pointing at
-`src/index.ts` with Node >= 22.18:
+You can also log in directly via the MCP tool: ask your assistant to call `cis_login` with your username and password.
+
+To log out and remove the saved session:
+
+```bash
+pnpm signout
+```
+
+### Register with MCP Clients
+
+Point at `src/index.ts` with Node >= 22.18:
 
 ```json
 {
@@ -27,13 +31,12 @@ Register with the Claude desktop app (or run the sibling setup script pattern), 
 }
 ```
 
-Keep a logged-in CEdX tab open in Chrome while using the tools.
-
 ## Tools (v0.1)
 
 | Tool | What it does |
 | --- | --- |
-| `cis_status` | Confirms a logged-in CEdX tab is reachable and returns your name |
+| `cis_login` | Log in with CEdX username and password (saves persistent session) |
+| `cis_status` | Confirms login status and returns your signed-in name |
 | `cis_get_transcript` | Full transcript (code, period, credits, grade, grade quality) + computed cumulative GPA |
 | `cis_get_schedule` | This week's class schedule (subject, class, day, date, time, room) for the current period |
 | `cis_list_library_rooms` | Bookable library rooms (A225 Collaboration/Study rooms) with capacity |

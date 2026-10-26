@@ -10,6 +10,7 @@ export const SITE_HOST = new URL(SITE_URL).host;
 export const BROWSER_APP = process.env.CIS_BROWSER_APP ?? "Google Chrome";
 
 export const CONFIG_DIR = process.env.CIS_CONFIG_DIR ?? join(homedir(), ".config", "cis-mcp");
+export const SESSION_FILE = join(CONFIG_DIR, "session.json");
 export const DOWNLOAD_DIR = process.env.CIS_DOWNLOAD_DIR ?? join(homedir(), "Downloads", "cis");
 
 /** Universitas Ciputra is in WIB (UTC+7, no DST). */

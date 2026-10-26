@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { loginWithCredentials } from "./auth.ts";
 import { cisRequest, listAccounts } from "./chrome-tab.ts";
 import { firstMatch, parseRows } from "./html.ts";
+import { loadSession } from "./session.ts";
 
 /** Optional account selector shared by every tool. */
 export const ACCOUNT_ARG = z
@@ -9,7 +11,7 @@ export const ACCOUNT_ARG = z
   .optional()
   .describe(
     "Which CEdX account to act as, matched against the signed-in name of each open CEdX tab (case-insensitive, partial match, e.g. 'Marsha'). " +
-      "Use when several Chrome profiles are signed in. Omit to use the first CEdX tab found. cis_status lists the names.",
+      "Use when several Chrome profiles are signed in. Omit to use the saved credentials session or first tab found. cis_status lists the names.",
   );
 
 export function jsonResult(data: unknown): { content: { type: "text"; text: string }[] } {
@@ -24,21 +26,67 @@ function num(s: string | undefined): number | null {
 
 export function registerCoreTools(server: McpServer): void {
   server.registerTool(
+    "cis_login",
+    {
+      title: "Log in to CEdX",
+      description:
+        "Logs in to the Ciputra CEdX student portal (student.ciputra.ac.id) using your username (or student email / NIM) and password. " +
+        "Saves the session to ~/.config/cis-mcp/session.json.",
+      inputSchema: {
+        username: z.string().describe("CEdX username (or student email / NIM)"),
+        password: z.string().describe("CEdX password"),
+      },
+    },
+    async ({ username, password }) => {
+      const session = await loginWithCredentials(username, password);
+      return jsonResult({ loggedIn: true, fullName: session.fullName, username: session.username });
+    },
+  );
+
+  server.registerTool(
     "cis_status",
     {
       title: "CEdX login status",
       description:
-        "Checks that an open, logged-in CEdX tab (student.ciputra.ac.id) is reachable in the user's browser and returns the signed-in name. " +
-        "Also lists every signed-in account across Chrome profiles; pass one of those names (or part of it) as `account` to other tools to act as that account. " +
-        "Run this first if other tools report no tab or a logged-out session.",
+        "Checks whether you are logged in to CEdX and returns the signed-in student's name and details. " +
+        "Checks saved credentials first, with fallback to open browser tabs across profiles.",
       inputSchema: { account: ACCOUNT_ARG },
       annotations: { readOnlyHint: true },
     },
     async ({ account }) => {
-      const accounts = (await listAccounts()).filter((a) => a !== "");
-      const res = await cisRequest("/student_dashboard", { method: "GET", account });
-      const name = firstMatch(res.body, /Hi,\s*([^<]+?)\s*</i);
-      return jsonResult({ loggedIn: true, name: name ?? undefined, signedInAccounts: accounts });
+      const session = await loadSession();
+      if (session && !account) {
+        try {
+          const res = await cisRequest("/student_dashboard", { method: "GET" });
+          const name = firstMatch(res.body, /Hi,\s*([^<]+?)\s*</i) ?? session.fullName;
+          return jsonResult({
+            loggedIn: true,
+            name,
+            username: session.username,
+            sessionSavedAt: session.createdAt,
+            method: "credentials",
+          });
+        } catch {
+          // Saved session expired, fall through to browser tab check
+        }
+      }
+
+      try {
+        const accounts = (await listAccounts()).filter((a) => a !== "");
+        const res = await cisRequest("/student_dashboard", { method: "GET", account });
+        const name = firstMatch(res.body, /Hi,\s*([^<]+?)\s*</i);
+        return jsonResult({
+          loggedIn: true,
+          name: name ?? undefined,
+          signedInAccounts: accounts,
+          method: "browser",
+        });
+      } catch {
+        return jsonResult({
+          loggedIn: false,
+          hint: "Not logged in. Call cis_login with username and password, or run pnpm signin.",
+        });
+      }
     },
   );
 

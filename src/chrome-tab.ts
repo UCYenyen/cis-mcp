@@ -2,11 +2,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { BROWSER_APP, SITE_HOST, SITE_URL } from "./config.ts";
+import type { CisSession } from "./session.ts";
+import { loadSession, saveSession } from "./session.ts";
 
 const run = promisify(execFile);
 
 const OPEN_TAB_HINT =
-  `Open ${SITE_URL} in ${BROWSER_APP} and sign in (an already logged-in tab is fine), then try again.`;
+  `Log in with cis_login (username/password), run pnpm signin, or open ${SITE_URL} in ${BROWSER_APP} and sign in.`;
 const APPLE_EVENTS_HINT =
   `In ${BROWSER_APP}'s menu bar, turn on View → Developer → "Allow JavaScript from Apple Events" (one-time), then try again.`;
 
@@ -26,8 +28,8 @@ export class AccountNotFoundError extends Error {
   }
 }
 export class NotLoggedInError extends Error {
-  constructor() {
-    super(`Your CEdX session looks logged out. ${OPEN_TAB_HINT}`);
+  constructor(msg?: string) {
+    super(msg ?? `Your CEdX session looks logged out or expired. ${OPEN_TAB_HINT}`);
     this.name = "NotLoggedInError";
   }
 }
@@ -155,19 +157,70 @@ export interface CisResponse {
   body: string;
 }
 
+const USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+async function fetchWithSession(
+  session: CisSession,
+  url: string,
+  options: { method?: "GET" | "POST"; data?: Record<string, unknown> } = {},
+): Promise<CisResponse> {
+  const method = options.method ?? (options.data ? "POST" : "GET");
+  const headers: Record<string, string> = {
+    "User-Agent": USER_AGENT,
+    Cookie: `ci_session=${session.ciSession}`,
+    Referer: `${SITE_URL}/student_dashboard`,
+  };
+
+  let body: string | undefined = undefined;
+  if (method === "POST" && options.data) {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(options.data)) {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    }
+    headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+    body = params.toString();
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body,
+    redirect: "follow",
+  });
+
+  // Track session cookie updates
+  const setCookies = res.headers.getSetCookie();
+  for (const c of setCookies) {
+    const match = /^ci_session=([^;]+)/i.exec(c.trim());
+    if (match?.[1] && match[1] !== session.ciSession) {
+      session.ciSession = match[1];
+      await saveSession(session);
+    }
+  }
+
+  const text = await res.text();
+  const finalUrl = res.url || url;
+
+  if (
+    /\/\?red=/.test(finalUrl) ||
+    res.status === 401 ||
+    res.status === 403 ||
+    (LOGIN_MARKERS.some((m) => text.includes(m)) && text.length < 60_000)
+  ) {
+    throw new NotLoggedInError("Your saved CEdX session has expired. Call cis_login or run pnpm signin.");
+  }
+
+  return { status: res.status, url: finalUrl, body: text };
+}
+
 /**
- * Make a request to CEdX through the user's logged-in browser tab.
- * `path` is relative to the site root, e.g. "/index.php/student_info/get_tab_transcript_close".
- * macOS only (uses AppleScript).
+ * Executes a request in an open Chrome tab via AppleScript (macOS fallback).
  */
-export async function cisRequest(
-  path: string,
+async function cisRequestInTab(
+  url: string,
   options: { method?: "GET" | "POST"; data?: Record<string, unknown>; account?: string } = {},
 ): Promise<CisResponse> {
-  if (process.platform !== "darwin") {
-    throw new Error("cis-mcp talks to CEdX through an open browser tab, which only works on macOS.");
-  }
-  const url = path.startsWith("http") ? path : `${SITE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
   const code = buildInTabCode(options.method ?? "POST", url, options.data);
 
   let stdout: string;
@@ -202,6 +255,42 @@ export async function cisRequest(
     throw new NotLoggedInError();
   }
   return { status: inner.status ?? 0, url: finalUrl, body };
+}
+
+/**
+ * Make a request to CEdX using the saved session credentials or through an open browser tab.
+ * `path` is relative to the site root, e.g. "/index.php/student_info/get_tab_transcript_close".
+ */
+export async function cisRequest(
+  path: string,
+  options: { method?: "GET" | "POST"; data?: Record<string, unknown>; account?: string } = {},
+): Promise<CisResponse> {
+  const url = path.startsWith("http") ? path : `${SITE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  // If no specific browser account was requested, try saved session credentials first
+  if (!options.account) {
+    const session = await loadSession();
+    if (session) {
+      try {
+        return await fetchWithSession(session, url, options);
+      } catch (err) {
+        if (!(err instanceof NotLoggedInError)) throw err;
+        // Session expired, attempt browser fallback if available
+      }
+    }
+  }
+
+  // Fall back to open browser tab if on macOS
+  if (process.platform === "darwin") {
+    try {
+      return await cisRequestInTab(url, options);
+    } catch (tabErr) {
+      if (options.account) throw tabErr;
+      throw new NotLoggedInError("You are not logged in to CEdX. Call cis_login with username and password, or run pnpm signin.");
+    }
+  }
+
+  throw new NotLoggedInError("You are not logged in to CEdX. Call cis_login with username and password, or run pnpm signin.");
 }
 
 /**

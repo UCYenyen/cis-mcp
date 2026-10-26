@@ -6,6 +6,8 @@
   "private": true,
   "scripts": {
     "start": "node src/index.ts",
+    "signin": "node src/cli/login.ts",
+    "signout": "node src/cli/logout.ts",
     "typecheck": "tsc"
   },
   "engines": {
