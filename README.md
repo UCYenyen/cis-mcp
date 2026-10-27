@@ -43,12 +43,21 @@ Point at `src/index.ts` with Node >= 22.18:
 | `cis_room_schedule` | A room's booking schedule for a date: slots and which are already booked |
 | `cis_my_bookings` | Your own room-booking requests and their status |
 | `cis_book_room` | Request a room booking (submitted for approval). Asks for a macOS confirmation first |
+| `cis_logbook_classes` | Classes you can write a Student Assistant logbook entry for, and the media options |
+| `cis_logbook_history` | Your submitted logbook entries with approval status |
+| `cis_logbook_submit` | Submit a logbook entry: uploads the attachment and marks students present, then confirms it appears in the history. Asks for a macOS confirmation first; `dryRun` validates only |
 
 ## Multiple accounts (Chrome profiles)
 
 Every tool takes an optional `account`, matched (case-insensitive, partial) against the signed-in
 name of each open CEdX tab. Open CEdX in each Chrome profile you want to use; `cis_status` lists
 the names it can see. Omit `account` to use the first CEdX tab found.
+
+## Logbook
+
+`cis_logbook_submit` needs a saved login (`pnpm signin` / `cis_login`) because the attachment is uploaded outside the browser tab.
+Like bookings, it asks for a macOS confirmation unless `"autoApproveLogbook": true` is set in `cis.config.json` (or
+`CIS_AUTO_APPROVE_LOGBOOK=1`), which is needed on machines that cannot show the dialog, such as a Linux server.
 
 ## Unattended bookings
 

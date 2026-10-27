@@ -227,6 +227,35 @@ async function fetchWithSession(
 }
 
 /**
+ * Uploads a file (multipart/form-data) to CEdX with the saved login. File uploads cannot go through
+ * the open-browser-tab path, so this needs a session from cis_login / pnpm signin.
+ */
+export async function cisUpload(
+  url: string,
+  field: string,
+  file: { name: string; type: string; bytes: Uint8Array },
+): Promise<CisResponse> {
+  const session = await loadSession();
+  if (!session) throw new NotLoggedInError("Uploading a file needs a saved CEdX login. Call cis_login or run pnpm signin.");
+
+  const form = new FormData();
+  form.append(field, new Blob([file.bytes as BlobPart], { type: file.type }), file.name);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "User-Agent": USER_AGENT, Cookie: cookieHeader(session), Referer: `${SITE_URL}/student_assistant/logbook` },
+    body: form,
+  });
+  if (mergeSetCookies(session, res.headers.getSetCookie())) await saveSession(session);
+
+  const text = await res.text();
+  const finalUrl = res.url || url;
+  if (/\/\?red=/.test(finalUrl) || res.status === 401 || res.status === 403) {
+    throw new NotLoggedInError("Your saved CEdX session has expired. Call cis_login or run pnpm signin.");
+  }
+  return { status: res.status, url: finalUrl, body: text };
+}
+
+/**
  * Executes a request in an open Chrome tab via AppleScript (macOS fallback).
  */
 async function cisRequestInTab(

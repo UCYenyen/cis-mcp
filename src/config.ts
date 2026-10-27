@@ -33,3 +33,18 @@ export function autoApproveBookings(): boolean {
     return false;
   }
 }
+
+/**
+ * When true, cis_logbook_submit submits without the macOS confirmation dialog (needed on machines
+ * that cannot show it, e.g. a Linux server). Set "autoApproveLogbook": true in cis.config.json,
+ * or CIS_AUTO_APPROVE_LOGBOOK=1. Read on every call.
+ */
+export function autoApproveLogbook(): boolean {
+  if (process.env.CIS_AUTO_APPROVE_LOGBOOK === "1") return true;
+  try {
+    const cfg = JSON.parse(readFileSync(join(PROJECT_DIR, "cis.config.json"), "utf8")) as { autoApproveLogbook?: unknown };
+    return cfg.autoApproveLogbook === true;
+  } catch {
+    return false;
+  }
+}
